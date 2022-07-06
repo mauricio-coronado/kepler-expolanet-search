@@ -1,0 +1,58 @@
+name,class,category,selection1,n_missing,selection2,selection2_comment,selection3,short_description,short_name
+koi_pdisposition,factor,project disposition,yes,0,yes,,yes,Category: CANDIDATE or EXOPLANET,pdisposition
+koi_period,numeric,transit properties,yes,0,yes,,yes,Interval between consecutive planetary transits,period
+koi_time0bk,numeric,transit properties,no,,no,,no,,time0bk
+koi_time0,numeric,transit properties,no,,no,,no,,time0
+koi_impact,numeric,transit properties,no,,no,,no,,impact
+koi_duration,numeric,transit properties,no,,no,,no,,duration
+koi_depth,numeric,transit properties,yes,363,yes,,yes,Fraction of stellar flux lost at the minimum of the planetary transit,depth
+koi_ror,numeric,transit properties,yes,363,no,planet radius divided by stellar radius; highly correlated with koi_prad (planet radius),no,,ror
+koi_srho,numeric,transit properties,yes,363,yes,,yes,Fitted stellar density,srho
+koi_fittype,factor,transit properties,yes,0,yes,,yes,Type of Fit for planetary parameters,fittype
+koi_prad,numeric,transit properties,yes,363,yes,,yes,The radius of the planet,prad
+koi_sma,numeric,transit properties,yes,363,no,size of the orbit; highly correlated with koi_period (time between transits),no,,sma
+koi_incl,numeric,transit properties,no,,no,,no,,incl
+koi_teq,numeric,transit properties,yes,363,yes,,yes,Approximation for the temperature of the planet,teq
+koi_insol,numeric,transit properties,yes,321,yes,,yes,Insolation Flux. This is another way to give the equilibrium temperature,insol
+koi_dor,numeric,transit properties,yes,363,no,distance between planet and star; highly correlated with koi_period (time between transits),no,,dor
+koi_ldm_coeff2,numeric,transit properties,no,,no,,no,,ldm_coeff2
+koi_ldm_coeff1,numeric,transit properties,no,,no,,no,,ldm_coeff1
+koi_parm_prov,factor,transit properties,no,,no,,no,,parm_prov
+koi_max_sngle_ev,numeric,tce information,yes,1142,no,highly correlated with koi_depth (fraction of stellar flux lost),no,,max_sngle_ev
+koi_max_mult_ev,numeric,tce information,yes,1142,no,highly correlated with koi_depth (fraction of stellar flux lost),no,,max_mult_ev
+koi_model_snr,numeric,tce information,yes,363,no,highly correlated with koi_depth (fraction of stellar flux lost),no,,model_snr
+koi_count,numeric,tce information,yes,0,yes,,yes,Number of planet candidates identified in a system,count
+koi_num_transits,numeric,tce information,yes,1142,no,number of expected transits; highly correlated with koi_teq (approximate temperature of the planet (whut?)),no,,num_transits
+koi_tce_plnt_num,numeric,tce information,yes,346,no,Planet Number federated to the KOI; highly correlated with koi_count (Number of planet candidates identified in a system),no,,tce_plnt_num
+koi_tce_delivname,factor,tce information,no,,no,,no,,tce_delivname
+koi_quarters,numeric,tce information,no,,no,,no,,quarters
+koi_bin_oedp_sig,numeric,tce information,no,,no,,no,,bin_oedp_sig
+koi_steff,numeric,stellar parameters,no,,no,,no,,steff
+koi_slogg,numeric,stellar parameters,no,,no,,no,,slogg
+koi_smet,numeric,stellar parameters,yes,386,yes,,yes,Stellar metallicity,smet
+koi_srad,numeric,stellar parameters,no,,no,,no,,srad
+koi_smass,numeric,stellar parameters,no,,no,,no,,smass
+koi_sparprov,factor,stellar parameters,yes,363,yes,,yes,A flag describing the source of the stellar parameters,sparprov
+ra,numeric,kic parameters,yes,0,yes,,yes,KIC Right Ascension (equivalent to longitude in maps),ra
+dec,numeric,kic parameters,yes,0,yes,,yes,KIC Declination (equivalent to latitude in maps),dec
+koi_kepmag,numeric,kic parameters,no,,no,,no,,kepmag
+koi_gmag,numeric,kic parameters,no,,no,,no,,gmag
+koi_rmag,numeric,kic parameters,no,,no,,no,,rmag
+koi_imag,numeric,kic parameters,no,,no,,no,,imag
+koi_zmag,numeric,kic parameters,no,,no,,no,,zmag
+koi_jmag,numeric,kic parameters,no,,no,,no,,jmag
+koi_hmag,numeric,kic parameters,no,,no,,no,,hmag
+koi_kmag,numeric,kic parameters,no,,no,,no,,kmag
+koi_fwm_stat_sig,numeric,pixel-based statistics,no,,no,,no,,fwm_stat_sig
+koi_fwm_sra,numeric,pixel-based statistics,yes,506,no,perfectly correlated with dec (KIC Right Ascension),no,,fwm_sra
+koi_fwm_sdec,numeric,pixel-based statistics,yes,506,no,perfectly correlated with dec (KIC declination),no,,fwm_sdec
+koi_fwm_srao,numeric,pixel-based statistics,yes,455,yes,,yes,Light curve contamination measures,fwm_srao
+koi_fwm_sdeco,numeric,pixel-based statistics,yes,455,yes,,yes,Light curve contamination measures,fwm_sdeco
+koi_fwm_prao,numeric,pixel-based statistics,yes,830,no,highly correlated with koi_fwm_pdeco,no,,fwm_prao
+koi_fwm_pdeco,numeric,pixel-based statistics,yes,817,yes,,no,many missing values,fwm_pdeco
+koi_dicco_mra,numeric,pixel-based statistics,yes,599,no,image measurement; highly correlated with koi_dikco_mra,no,,dicco_mra
+koi_dicco_mdec,numeric,pixel-based statistics,yes,599,no,image measurement; highly correlated with koi_dikco_mdec,no,,dicco_mdec
+koi_dicco_msky,numeric,pixel-based statistics,yes,599,no,image measurement; highly correlated with koi_dikco_msky,no,,dicco_msky
+koi_dikco_mra,numeric,pixel-based statistics,yes,570,yes,,yes,Light curve contamination measures,dikco_mra
+koi_dikco_mdec,numeric,pixel-based statistics,yes,570,yes,,yes,Light curve contamination measures,dikco_mdec
+koi_dikco_msky,numeric,pixel-based statistics,yes,570,yes,,yes,Light curve contamination measures,dikco_msky

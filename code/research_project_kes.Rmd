@@ -1,0 +1,757 @@
+---
+title: "Research Project: Kepler Exoplanet Search"
+author: "Mauricio Coronado"
+geometry: margin=3cm
+output: 
+  pdf_document:
+    keep_tex: true
+    toc: true
+    toc_depth: 3
+    number_sections: true
+header-includes:
+- \usepackage{makeidx}
+- \makeindex
+fontsize: 10pt
+linestretch: 1.5
+always_allow_html: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.pos = "!h", out.extra = "")
+```
+
+
+```{r, include=FALSE}
+library(tidyverse)
+library(opendatatoronto)
+library(tidyverse)
+library(stringr)
+library(skimr) # EDA
+library(visdat) # EDA
+library(janitor)
+library(lubridate)
+library(ggrepel)
+library(glue)
+library(faraway)
+library(gridExtra)
+library(tidybayes) 
+library(bayesplot)
+library(loo)
+library(fdrtool)
+library(rstan)
+library(ggcorrplot)
+library(grid)
+library(fastDummies)
+```
+
+\newpage
+# Introduction
+
+The Kepler Space Telescope is a retired NASA build telescope launched in 2009. It was dedicated to searching for planets in other star systems, also known as exoplanets. The ultimate goal of this mission and many others of this kind is to find other habitable planets besides our own.
+
+After 9 years in deep space collecting data, the Kepler telescope found nearly 10,000 objects of interest (KOIs). For most of these objects, astronomical experts and researchers had to conduct further analysis with the help of specialized equipment to determine if the KOI was either a candidate exoplanet or a false positive.
+
+Although this mission ended in 2018 after the satellite ran out of fuel, there are more missions planned to continue the pursuit of this goal; new data are expected to be collected in the coming years, so a more efficient way to categorize these measures is desired.
+
+There have been several attempts in the machine learning community to tackle this task, some of them achieving great success, namely ExoMiner\cite{exominer}, however, the approach in this work will be: (1) to use Bayesian methods, and (2) to try to explain the outcome with a small amount of covariates to increase explainability. There are three main differences from what I present here and previous work I found that share this mindset:
+
+1. The starting point is the complete dataset of 140 variables, unlike previous work I found which started with 50 variables which is the default number of columns in the NASA website.
+
+2. Error columns were removed as potential explanatory variables.
+
+3. Project disposition columns were removed as potential explanatory variables. These columns seem to contain information from the expert analysis which determined if the KOI was a Candidate Exoplanet or a False Positive, so it would be useless for the goal of the project to have them included in the model.
+
+Because of those structural differences, the results are expected to differ from the previous works I mentioned, namely \cite{alb}
+
+\newpage
+# Data
+
+## Dataset Description
+
+The dataset comes from the [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/cgi-bin/TblView/nph-tblView?app=ExoTbls&config=cumulative) and contains the cumulative record of all observed Kepler Objects of Interest. There are a total of 9,564 observations.
+
+The dataset contains 140 variables divided into 8 categories\cite{nasa}:
+
+- Identification Columns: id and name of the KOIs (2 variables).
+
+- Exoplanet Archive Information: id information populated only for the confirmed exoplanets (4 variables).
+
+- Project Disposition Columns: Disposition is the attempt to categorise KOI's into CANDIDATE or FALSE POSITIVE (with a score) (8 variables).
+
+- Transit Properties: transit properties are the core measurements of the planetary transit. The planetary transit is the process when a planet passes between the telescope and the star which the telescope is aiming at. The diminishment in the light the telescope receives from the star is precisely how the telescope identifies the objects of interest (58 variables).
+
+- Threshold-Crossing Event (TCE) Information: this is mostly useful for determining the number of transits and the number of planets detected for a star. It also contains normalized measures of the events that trigger the detection of the KOI (13 variables). 
+
+- Stellar: key characteristics of the star (19 variables).
+
+- Kepler Input Catalog (KIC): describes the star's sky coordinates along with spectrometry magnitudes (10 variables).
+
+- Pixel-Based Statistics: pixel analysis methods used to identify light curve contamination (25 variables).
+
+The dependent variable is called Disposition and contains the most probable physical explanation of the KOI given the information and analysis made on them. It's a binary variable and its values are CANDIDATE or FALSE POSITIVE
+
+## Preliminary Feature Selection
+
+The following steps were taken on the data in order to reduce the amount of potential explanatory variables:
+
+1. For the purposes of this analysis, error variables (uncertainty values associated with the measured properties) were removed. This is just a simplification to the model, although for accurate interpretation of statistical significance the error variables could prove to be valuable.
+
+2. Variables with more than 50% of missing values were removed.
+
+3. From the variables of type characterthe, the columns that had either just one unique value or more than 10 unique values were removed . The former are useless as potential explanatory variables and the latter were considered to be identifier variables. Actually, although the threshold used was 10, the smallest value that crossed this threshold was the column "koi_comment", with 996 unique values. The remaining variables were converted to factor.
+
+4. Single-valued and identifier numerical variables were removed. 
+
+5. Finally, as mentioned before, the Project Disposition numerical and categorical columns were removed.
+
+Table \ref{table:datasize} depicts how the size of the dataset changed with every step described above.
+
+\begin{center} 
+\begin{table}[h]
+\begin{tabular}{c l c c} 
+
+\hline\hline 
+Step & Short Description & Variables after Step i \\ [0.5ex] 
+\hline
+0 & Load the Data & 140 \\ 
+1 & Removed Error Variables & 82 \\
+2 & Removed Empty Columns & 76 \\
+3 & Removed Character Non-Categorical Variables & 66 \\ 
+4 & Removed ID and Single-Valued Numerical Variables & 62 \\ 
+5 & Removed Project Disposition Variables & 57 \\ 
+\hline 
+\end{tabular}
+\caption{Preliminary Feature Selection}
+\label{table:datasize}
+\end{table}
+\end{center} 
+
+```{r, echo=FALSE, include=FALSE}
+############## DATA ##################
+
+# load data
+koi <- read_csv("https://raw.githubusercontent.com/mauricio-coronado/STA2201/main/data/kepler_objects_of_interest_all.csv")
+
+# erase error columns
+koi <- koi %>% 
+  select(-contains("err"))
+
+### MISSING COLS
+
+n <- nrow(koi)
+# check missing values for each column
+koi_missing_vals <- koi %>% 
+  summarise(across(everything(), ~sum(is.na(.x)))) %>% 
+  rownames_to_column() %>%  
+  pivot_longer(-rowname) %>% 
+  pivot_wider(names_from=rowname, values_from=value) %>% 
+  rename("missing_values"="1") %>% 
+  arrange(desc(missing_values)) %>% 
+  mutate(missing_values = missing_values/n) 
+
+# Erase columns with more than 50% missing values
+koi_empty_cols <- koi_missing_vals %>% 
+  filter(missing_values > 0.5) %>% 
+  pull(name)
+
+koi <- koi %>% 
+  select(-all_of(koi_empty_cols))
+
+# see datatypes of remaining variables
+skim(koi)
+
+### CHARACTER COLS FILTERING
+
+# get variables of type character and the number of unique values
+char_vars <-  names(koi)[sapply(koi, is.character)]
+chars_df <- data.frame(row.names = char_vars)
+for (var in char_vars) {
+  chars_df[var, "unique_vals"] <- dim(unique(koi[,var]))[1]
+}
+chars_df
+
+# Remove columns with more than 5 unique values or just 1
+koi_char_cols <- chars_df %>% 
+  rownames_to_column("name") %>% 
+  filter(unique_vals > 5 | unique_vals == 1) %>% 
+  pull(name) 
+
+koi <- koi %>% 
+  select(-all_of(koi_char_cols))
+
+# Analyze the other 8 character variables
+char_vars <- names(koi)[sapply(koi, is.character)]
+koi[, char_vars]
+
+# koi_disposition: out
+# koi_pdisposition: dependent variable, in
+# koi_fittype: Type of Fit for planetary parameters, in
+# koi_limbdark_mod: either empty or just one value, out
+# koi_parm_prov: KOI Parameter Provenance, in
+# koi_tce_delivname: TCE delivery name corresponding to the TCE data federated to the KOI, in
+# koi_trans_mod: either empty or just one value, out
+# koi_sparprov: A flag describing the source of the stellar parameters, in
+
+# after the previous analysis remove koi_disposition, koi_limbdark_mod and koi_trans_mod
+char_vars_out <- c("koi_disposition", "koi_limbdark_mod", "koi_trans_mod")
+koi <- koi %>% 
+  select(-all_of(char_vars_out))
+
+# convert character variables to factors
+koi <- koi %>%
+  mutate_if(sapply(koi, is.character), as.factor)
+  
+skim(koi)
+
+### NUMERIC COLS FILTERING
+
+num_vars <- names(koi)[sapply(koi, is.numeric)]
+num_df <- data.frame(row.names = num_vars)
+for (var in num_vars) {
+  num_df[var, "unique_vals"] <- dim(unique(koi[,var]))[1]
+}
+num_df
+
+# remove kepid because it's an identifier 
+# remove koi_score and koi_fpflags because that's what determines candidate versus false pos
+# remove koi_eccen, koi_ldm_coeff4 and koi_ldm_coeff3 because they only have one value
+num_vars_out <- c("kepid", "koi_score", "koi_fpflag_nt", "koi_fpflag_ss", 
+                  "koi_fpflag_co", "koi_fpflag_ec", "koi_eccen", 
+                  "koi_ldm_coeff4", "koi_ldm_coeff3")
+koi <- koi %>% 
+  select(-all_of(num_vars_out))
+
+skim(koi)
+```
+
+## EDA
+
+To continue with the feature selection an Exploratory Data Analysis was conducted with the aim of finding relationships between the remaining potential explanatory variables and the dependent variable.
+
+At this point, from the 57 variables, 52 were numerical and 5 categorical (1 being the dependent variable). 
+
+For the numerical variables density plots split by disposition were made for each variable. Then, proceed to manually select the variables that showed difference in the distribution of a Candidate versus a False positive as this shows signs of explanatory power.
+
+An example of a desired behavior is found in Figure \ref{fig:fig1}. The yellow density is that of the Candidate Exoplanets, while the dark blue is the density of the False Positives in the dataset. There is a clear distinction between them, hinting that for large amounts of depth (fraction of light lost) it is likelier that the observation is a false positive. Notice that the x-axis are in log10, accommodating for the exponential nature of distributions on the astronomical scale. This is a feature that we saw in many of the variables and was taken into consideration when fitting the model in later stages.
+
+```{r fig1, fig.cap = "\\label{fig:fig1}Density Plot of a Candidate Explanatory Variable", fig.align='center', out.width='90%', echo=FALSE, warning=FALSE}
+ggplot(koi, aes(x = koi_depth, fill = koi_pdisposition)) +
+    geom_density(alpha = 0.3) + 
+    scale_fill_manual(values = c("#E69F00", "#1D2951")) +
+    # theme(legend.position = "none") +
+    scale_x_log10() 
+```
+
+```{r, eval=FALSE, echo=FALSE}
+
+### VARIABLE SELECTION
+
+# density plots for all the numeric variables
+koi_numeric <- koi[, sapply(koi, is.numeric)]
+
+for (var in names(koi_numeric)) {
+  
+  print(ggplot(koi, aes(x = .data[[var]], fill = koi_pdisposition)) +
+    geom_density(alpha = 0.3) + 
+    scale_fill_manual(values = c('#00BFC4', '#F8766D')) +
+    theme(legend.position = "none") +
+    scale_x_log10())
+}
+
+```
+
+From this process 30 numerical variables were selected.
+
+For the categorical variables, the selection was made by using ring charts. In Figure \ref{fig:fig2} we can see these graphs for all the categorical variables. What we look for in these was for the proportions to be different in each category (graphs were the rings that don't align with the rest).
+
+```{r fig2, fig.cap = "\\label{fig:fig2}Graphs of Proportions for Categorical Variables", fig.align='center', out.width='90%', echo=FALSE, warning=FALSE}
+
+# ring charts for factor variables
+factor_vars <- names(koi)[sapply(koi, is.factor)]
+
+p1 <- ggplot(data = koi, aes_string(x = factor_vars[2], fill = "koi_pdisposition")) + 
+        geom_bar(position = "fill", alpha=0.75) +
+        coord_polar(theta = "y") +
+        scale_fill_manual(values = c("#E69F00", "#1D2951")) + 
+        theme(legend.position = "none") 
+        # labs(x="", title="Disposition Proportion by Factor")
+
+p2 <- ggplot(data = koi, aes_string(x = factor_vars[3], fill = "koi_pdisposition")) + 
+        geom_bar(position = "fill", alpha=0.75) +
+        coord_polar(theta = "y") +
+        scale_fill_manual(values = c("#E69F00", "#1D2951")) + 
+        theme(legend.position = "none") 
+        # labs(x="", title="Disposition Proportion by Factor")
+
+p3 <- ggplot(data = koi, aes_string(x = factor_vars[4], fill = "koi_pdisposition")) + 
+        geom_bar(position = "fill", alpha=0.75) +
+        coord_polar(theta = "y") +
+        scale_fill_manual(values = c("#E69F00", "#1D2951")) + 
+        theme(legend.position = "none") 
+        # labs(x="", title="Disposition Proportion by Factor")
+
+p4 <- ggplot(data = koi, aes_string(x = factor_vars[5], fill = "koi_pdisposition")) + 
+        geom_bar(position = "fill", alpha=0.75) +
+        coord_polar(theta = "y") +
+        scale_fill_manual(values = c("#E69F00", "#1D2951")) +
+        theme(legend.position = "none") 
+        # labs(x="", title="Disposition Proportion by Factor")
+
+
+grid.arrange(p1, p2, p3, p4, ncol = 2, nrow = 2,
+             top = textGrob("Disposition Proportion by Factor", 
+                            gp = gpar(fontsize=16, font=1)))
+```
+
+Without taking into account the none and NA values (missing values were covered later), we kept the variables koi_fittype and koi_sparprov because the proportions are very different for some of the categories.
+
+A correlation matrix (Figure \ref{fig:fig3}) of these initial 32 variables was computed to avoid redundance in the variables and multicolinearity issues.
+
+```{r fig3, fig.cap = "\\label{fig:fig3}Correlation Matrix", fig.align='center', out.width="150%", echo=FALSE, warning=FALSE}
+
+# Based on these graphs I made an initial selection for the model.
+# This selection can be found in the koi_categories.csv file 
+koi_selection_df <- read_csv("https://raw.githubusercontent.com/mauricio-coronado/STA2201/main/data/koi_selection2.csv")
+
+first_selection <- koi_selection_df %>% 
+  filter(selection1 == "yes") %>% 
+  pull(name)
+
+koi <- koi %>% 
+  select(all_of(first_selection))
+
+# Calculate correlation to avoid multicolinearity in the model
+complete_indexes <- koi %>% 
+  complete.cases()
+
+indexes <- c()
+j <- 1
+for (i in 1:length(complete_indexes)) {
+  if (complete_indexes[i] == TRUE) {
+    indexes[j] <- i
+    j = j+1
+  }
+}
+
+koi_numeric <- koi[, sapply(koi, is.numeric)]
+
+koi_numeric %>% 
+  slice(indexes) %>% 
+  cor() %>% 
+  ggcorrplot(hc.order = TRUE, type = "lower",
+   outline.col = "white",
+   ggtheme = ggplot2::theme_gray,
+   colors = c("#6D9EC1", "white", "#E46726"),
+   lab = TRUE, lab_size = 1.5)
+
+# We used correlation of 0.6 as a threshold to remove variables that might cause 
+# multicolinearity issues. I looked at the pair of variables and kept the one that had
+# less missing values
+```
+
+We used a threshold correlation of 0.6 as suggested in \cite{corr} to avoid multicolinearity between variables. The criteria used to determine which of the variables in conflict to keep was the number of their missing values. The variable with the highest number of missing values was dropped for each pair in conflict. By doing this, the number of potential explanatory variables was reduced to 18.
+
+For this set of variables, the number of observations with at least one missing value was 13.26%. Since this number is too high to just delete them we looked deeper into the variables causing it. Figure \ref{fig:fig4} shows the missing values for each of these 18 variables.
+
+```{r fig4, fig.cap = "\\label{fig:fig4}Missing values for the second selection of variables", fig.align='center', out.width='90%', echo=FALSE, warning=FALSE}
+# Pick the variables of our second selection
+second_selection <- koi_selection_df %>% 
+  filter(selection2 == "yes") %>% 
+  pull(name)
+
+koi <- koi %>% 
+  select(all_of(second_selection))
+
+# See how many rows are complete 
+complete_indexes <- koi %>% 
+  complete.cases()
+
+# sum(complete_indexes)/nrow(koi)
+
+# It would be better if we could increase that number. Closer look at the variables causing it
+vis_miss(koi)
+```
+
+We noticed that there were too many observations where the variable koi_fwm_pdeco was the only one missing. Due to thus and since this variable also has some positive correlation with other variables, we decided to remove it. By doing this, the number of observations with at least 1 missing value dropped to 9.8%. We proceeded to eliminate these observations.
+
+The table  below shows the initial selection of 18 variables for our first model. It contains the category to which each belongs as well as a short description of the measurement. It's worth noting that from the eight original categories, only five made it into the first iteration of the model.
+
+```{r tab, fig.cap = "\\label{table:tab2}Missing values for the second selection of variables", echo=FALSE}
+# Let's remove the most problematic
+koi <- koi %>% 
+  select(-koi_fwm_pdeco) 
+
+complete_indexes <- koi %>% 
+  complete.cases()
+
+# sum(complete_indexes)/nrow(koi)
+# significative improvement. Let's erase the missing rows keeping in mind that this might create 
+# issues.
+
+indexes <- c()
+j <- 1
+for (i in 1:length(complete_indexes)) {
+  if (complete_indexes[i] == TRUE) {
+    indexes[j] <- i
+    j = j+1
+  }
+}
+
+koi <- koi %>% 
+  slice(indexes)
+
+# The Model
+koi_selection_df %>% 
+  filter(selection3 == "yes") %>% 
+  select(short_name, class, category, short_description) %>% 
+  knitr::kable()
+```
+
+\newpage
+# Methods
+
+Since the variable of interest is binary, the statistical method we will use is bayesian logistic regression.
+
+The model then takes the form:
+
+$$
+Y_i \mid p_i \overset{ind}{\sim} \textrm{Bernoulli}(p_i), \,\,\, i = 1, \cdots, n.
+$$
+$$
+\textrm{logit}(p_i) = \beta_0 + \beta_{\textrm{transit}} x_{\textrm{transit}} + \beta_{\textrm{tce}} x_{\textrm{tce}} + \beta_{\textrm{stellar}} x_{\textrm{stellar}} +\\ \beta_{\textrm{kic}} x_{\textrm{kic}} + \beta_{\textrm{pixel}} x_{\textrm{pixel}}
+$$
+
+where $\beta_{category}$, $x_{category}$ are both vectors with length equal to the number of variables in the category included in the model. Another remark worth mentioning is that the entries of the vector $x_{category}$ can be functions of the explanatory variables such as the log of the variable, a mean-centered transformation of the variable, or a combination of both. We will include the explicit version of the final model later.
+
+The model was fitted using stan with the likelihood set according to the formulas above. The priors were meant to be low informative since we did not have the required knowledge about the features to provide more informative assumptions. 
+
+To validate the model, convergence checks were performed. We also confirmed the soundness of the priors by looking at the posterior distribution of the parameters, updating the assumption of these priors accordingly. Additionally, to validate the posterior distribution of the parameters, posterior predictive checks were performed. Finally, the original dataset was split into a train and a test set, with an 75-25 proportion, in order to test the accuracy of the final model.
+
+```{r, echo=FALSE}
+##############  METHODS ############
+
+# density plots for numeric variables
+# BOXPLOTS to know tthe distributions
+# koi_numeric <- koi[, sapply(koi, is.numeric)]
+# 
+# for (var in names(koi_numeric)) {
+#   
+#   print(ggplot(koi, aes(x = .data[[var]])) +
+#     geom_boxplot() +
+#     scale_x_log10())
+# }
+
+koi <- koi %>% 
+  mutate(koi_pdisposition = if_else(koi_pdisposition == "CANDIDATE", 1, 0),
+         koi_depth = if_else(koi_depth < 1, 1, koi_depth))
+  
+
+# create dummy variables for categorical variables
+koi <- dummy_cols(koi)
+
+
+set.seed(101) 
+# Set Seed so that same sample can be reproduced in future also
+# Now Selecting 75% of data as sample from total 'n' rows of the data  
+sample <- sample.int(n = nrow(koi), size = floor(.75*nrow(koi)), replace = F)
+koi_train <- koi[sample, ]
+koi_test  <- koi[-sample, ]
+```
+
+\newpage
+# Results
+
+We fitted a couple of iterations of the model before getting a final version. The reasons why variables were dropped after these iterations was because they presented convergence issues (KOI Fit V1, Figure \ref{fig:fig5}) or they showed low statistical significance (KOI Fit V2, Figure \ref{fig:fig6})
+
+
+```{r, echo=FALSE, eval=FALSE}
+# transform variabless in the log scale and center when applicable
+stan_data <- list(N = nrow(koi_train),
+                  y = koi_train$koi_pdisposition,
+                  period = koi_train$koi_period,     
+                  depth = koi_train$koi_depth,
+                  srho = koi_train$koi_srho,
+                  fittype_LS_MCMC = koi_train$'koi_fittype_LS+MCMC',
+                  fittype_MCMC = koi_train$koi_fittype_MCMC,
+                  fittype_LS = koi_train$koi_fittype_LS,
+                  prad = koi_train$koi_prad,
+                  teq = koi_train$koi_teq,
+                  insol = koi_train$koi_insol,
+                  count = koi_train$koi_count,
+                  smet = koi_train$koi_smet,
+                  sparprov_stellar = koi_train$koi_sparprov_q1_q17_dr25_stellar,
+                  sparprov_q16 = koi_train$koi_sparprov_stellar_q1_q16,
+                  sparprov_q17 = koi_train$koi_sparprov_stellar_q1_q17,
+                  sparprov_solar = koi_train$koi_sparprov_Solar,
+                  ra = koi_train$ra,
+                  dec = koi_train$dec,
+                  fwm_srao = koi_train$koi_fwm_srao,
+                  fwm_sdeco = koi_train$koi_fwm_sdeco,
+                  dikco_mra = koi_train$koi_dikco_mra,
+                  dikco_mdec = koi_train$koi_dikco_mdec,
+                  dikco_msky = koi_train$koi_dikco_msky)
+
+fit_koi1 = stan(data = stan_data, 
+               file = "model_exoplanets.stan",
+               iter = 500,
+               seed = 23)
+
+saveRDS(fit_koi1, "fit_koi1.rds")
+```
+
+
+```{r fig5, fig.cap = "\\label{fig:fig5}RHat for KOI Fit V1", fig.align='center', out.width='80%', echo=FALSE, warning=FALSE}
+fit_koi1 <- readRDS("fit_koi1.rds")
+
+rhats <- summary(fit_koi1)$summary[,"Rhat"]
+rhats_df <- data.frame(rhats) 
+nbetas <- nrow(rhats_df)
+
+rhats_sort_index <- rhats_df %>% 
+  mutate(index = seq(1, nbetas)) %>% 
+  arrange(rhats) %>% 
+  pull(index)
+
+par_names <- c("intercept", "log_period", "log_depth", "log_srho", 
+               "fittype_MCMC+LS", "fittype_MCMC", "fittype_LS",
+               "log_prad", "log_teq_centered", "log_insol",
+               "count", "smet", "sparprov_stellar", "sparprov_q15",
+               "sparprov_q16", "sparprov_q17", "sparprov_solar",
+               "ra", "dec", "fwm_srao", "fwm_sdeco", "dikco_mra",
+               "dikco_mdec", "dikco_msky", "lp")
+
+par_ord_names <- c()
+for (i in 1:length(rhats_sort_index)) {
+  par_ord_names[i] <- par_names[rhats_sort_index[i]]
+}
+
+mcmc_rhat(rhat(fit_koi1)) + 
+  yaxis_text(hjust = 1) +
+  scale_y_discrete(labels = par_ord_names)  
+```
+
+```{r, echo=FALSE, eval=FALSE}
+# transform variabless in the log scale and center when applicable
+stan_data <- list(N = nrow(koi_train),
+                  y = koi_train$koi_pdisposition,
+                  period = koi_train$koi_period,     
+                  depth = koi_train$koi_depth,
+                  srho = koi_train$koi_srho,
+                  fittype_LS_MCMC = koi_train$'koi_fittype_LS+MCMC',
+                  fittype_MCMC = koi_train$koi_fittype_MCMC,
+                  fittype_LS = koi_train$koi_fittype_LS,
+                  prad = koi_train$koi_prad,
+                  teq = koi_train$koi_teq,
+                  insol = koi_train$koi_insol,
+                  count = koi_train$koi_count,
+                  smet = koi_train$koi_smet,
+                  ra = koi_train$ra,
+                  dec = koi_train$dec,
+                  fwm_srao = koi_train$koi_fwm_srao,
+                  fwm_sdeco = koi_train$koi_fwm_sdeco)
+
+fit_koi2 = stan(data = stan_data, 
+               file = "model_exoplanets2.stan",
+               iter = 1000,
+               seed = 23)
+
+saveRDS(fit_koi2, "fit_koi_v2.rds")
+```
+
+
+```{r fig6, fig.cap = "\\label{fig:fig6}Posterior Distributions for KOI Fit V2", fig.align='center', out.width='80%', echo=FALSE, warning=FALSE, fig.pos="!h"}
+koi_fit2 <- readRDS("fit_koi_v2.rds")
+
+stan_hist(koi_fit2, pars=c("beta"), bins=40)
+
+par_names <- c("intercept", "log_period", "log_depth", "log_srho", 
+               "fittype_MCMC+LS", "fittype_MCMC", "fittype_LS",
+               "log_prad", "log_teq_centered", "log_insol",
+               "count", "smet", 
+               "ra", "dec", "fwm_srao", "fwm_sdeco")
+
+
+df_koi_fit2 <- as.data.frame(koi_fit2)
+mcmc_intervals(df_koi_fit2, regex_pars = "beta",
+               prob_outer = .95, prob = .5,
+               point_est = "median") +
+               scale_y_discrete(labels = par_names)
+```
+
+
+\newpage
+\newpage
+The final model then was 
+
+$$
+Y_i \mid p_i \overset{ind}{\sim} \textrm{Bernoulli}(p_i), \,\,\, i = 1, \cdots, n.
+$$
+
+$$
+\textrm{logit}(p_i) = \beta_0 + \beta_{\textrm{transit}} x_{\textrm{transit}} + \beta_{\textrm{tce}} x_{\textrm{tce}} + \beta_{\textrm{stellar}} x_{\textrm{stellar}} +\\ \beta_{\textrm{kic}} x_{\textrm{kic}} 
+$$
+with 
+
+$x_{\textrm{transit}} =$ (log(period), log(depth), log(srho), fittype_LS+MCMC, fittype_LS, log(prad), log(teq) - mean(log(teq)))
+
+$x_{\textrm{tce}} =$ count
+
+$x_{\textrm{stellar}} =$ smet
+
+$x_{\textrm{kic}} =$ (ra, dec)
+
+and 
+
+$\beta_i \sim N(0, 2)$
+
+Some remarks:
+
+- The model was dominated by variables of the category transit. These variables because of its astronomical properties had to be transformed into the log scale. The temperature (teq) was also centered around the log mean after the log transformation to be able to interpret the results against the mean temperature in the log scale and not against the absolute zero. The fittype variable was the only categorical variable to make it into the final model.
+
+- None of the Pixel-Based characteristics went into the model in the end. They showed to be not significant and probably an effect of randomness.
+
+- The prior for beta i was adjusted from a standard deviance of 10, then to 1 and ending in 2 after taking into consideration the density of the posterior distribution from the initial iterations.
+
+Results for the estimatation of this final model can be found below.
+
+```{r, eval=FALSE, echo=FALSE}
+# transform variabless in the log scale and center when applicable
+stan_data <- list(N = nrow(koi_train),
+                  y = koi_train$koi_pdisposition,
+                  period = koi_train$koi_period,     
+                  depth = koi_train$koi_depth,
+                  srho = koi_train$koi_srho,
+                  fittype_LS_MCMC = koi_train$'koi_fittype_LS+MCMC',
+                  fittype_LS = koi_train$koi_fittype_LS,
+                  prad = koi_train$koi_prad,
+                  teq = koi_train$koi_teq,
+                  count = koi_train$koi_count,
+                  smet = koi_train$koi_smet,
+                  ra = koi_train$ra,
+                  dec = koi_train$dec)
+
+koi_fit3 <- stan(data = stan_data, 
+               file = "model_exoplanets3.stan",
+               iter = 1000,
+               seed = 23)
+
+saveRDS(koi_fit3, "fit_koi_v3.rds")
+```
+
+**Convergence**
+
+We can appreciate in Figure \ref{fig:fig8} adecuate convergence of the MCMC chains.
+
+```{r fig8, fig.cap = "\\label{fig:fig8}Convergence of the MCMC chains", fig.align='center', out.width='80%', echo=FALSE, warning=FALSE, fig.pos="!h"}
+koi_fit3 <- readRDS("fit_koi_v3.rds")
+
+traceplot(koi_fit3, pars = c("beta"))
+```
+
+\newpage
+
+\newpage
+**Coefficient estimates and CIs**
+
+```{r fig9, fig.cap = "\\label{fig:fig9}CIs of the Estimates", fig.align='center', out.width='80%', echo=FALSE, warning=FALSE, fig.pos="t"}
+par_names <- c("intercept", "log_period", "log_depth", "log_srho", 
+               "fittype_MCMC+LS", "fittype_LS",
+               "log_prad", "log_teq_centered", 
+               "count", "smet", 
+               "ra", "dec")
+
+model_coefficients <- data.frame(summary(koi_fit3)$summary[1:12,]) %>%
+  mutate(Name = par_names) %>% 
+  select(Name, X2.5., X50., X97.5.) %>% 
+  rename(CI.Left = X2.5., Median = X50., CI.Right = X97.5.)
+
+model_coefficients %>% 
+  knitr::kable()
+
+df_koi_fit3 <- as.data.frame(koi_fit3)
+mcmc_intervals(df_koi_fit3, regex_pars = "beta",
+               prob_outer = .95, prob = .5,
+               point_est = "median") +
+               scale_y_discrete(labels = par_names)
+```
+
+\newpage
+- The reason why the variance is so low for most of the coefficients estimates is because those are in the logarithmic scale, so any slight movement makes a huge change. This is true for oall the variables that start with log, as well as for smet which came in log scale from the original dataset.
+
+- The smet coefficient seems to have great explanatory power by increasing the odds of being an exoplanet by $exp(1.68) = 5.37$ for every unit increase Stellar Mellacity. However, looking closer at the data we found that the range of the scale of the variable over the entire dataset is less than 0.5.
+
+- Count is another variable with one of the largest coefficients. In particular it tells us that the odds of finding an exoplanet increase by $exp(1.68) = 4.22$ for every additional candidate planet found in a particular system.
+
+- In the case of log_prad we found that the odds of being a false positive increase by $1/exp(-0.47) = 1.6$ for every decrease of the planetary radius in the log scale.
+
+- The categorical variable tells us that it is likelier to observe an exoplanet given that the planetary fit type was MCMC+LS rather than either LS or MCMC. On the other hand there is a higher chance of observing a false positive given that the planetary fit type was LS rather than MCMC. 
+
+**Posterior predictive check**
+
+```{r fig10, fig.cap = "\\label{fig:fig10}CIs of the Estimates", fig.align='center', out.width='80%', echo=FALSE, warning=FALSE}
+y = koi_train$koi_pdisposition
+yrep1 <- extract(koi_fit3)[["y_rep"]]
+samp100 <- sample(nrow(yrep1), 100)
+ppc_dens_overlay(y[1:6471], yrep1[samp100, ]) +
+  labs(title="Distribution of observed and replicated KOI Dispositions")
+```
+In Figure \ref{fig:fig10} we can see that the distribution of the data against 100 different datasets drawn from the posterior distribution is very accurate. There is only slight over estimation of exoplanets but overall our model does an excelent job at replicating the true distribution, hence, passes this test.  
+
+**Accuracy Test**
+
+```{r, echo=FALSE}
+coeffs <- model_coefficients %>% 
+  pull(Median)
+
+y = koi_test$koi_pdisposition
+log_period = log(koi_test$koi_period)     
+log_depth = log(koi_test$koi_depth)
+log_srho = log(koi_test$koi_srho)
+fittype_LS_MCMC = koi_test$'koi_fittype_LS+MCMC'
+fittype_LS = koi_test$koi_fittype_LS
+log_prad = log(koi_test$koi_prad)
+log_teq = log(koi_test$koi_teq) - mean(log(koi_test$koi_teq))
+count = koi_test$koi_count
+smet = koi_test$koi_smet
+ra = koi_test$ra
+dec = koi_test$dec
+
+logit = exp(coeffs[1] + coeffs[2]*log_period + coeffs[3]*log_depth + 
+            coeffs[4]*log_srho + coeffs[5]*fittype_LS_MCMC + coeffs[6]*fittype_LS + 
+            coeffs[7]*log_prad + coeffs[8]*log_teq + coeffs[9]*count + 
+            coeffs[10]*smet + coeffs[11]*ra + coeffs[12]*dec)
+
+test_pred <-  if_else(logit>1, 1, 0)
+test_y <- koi_test$koi_pdisposition
+accuracy <- if_else(test_pred == test_y, 1, 0)
+```
+
+We also took the test set to measure the accuracy of our model outside the training set. After calculating the log-odds of the probability of a Kepler Object of Interest being a candidate exoplanet, we could assign a label to each of the observations, which then was compared against the true value in the dataset. Our model achieved an accuracy of 79%. Certainly this result can be improved, but taking into consideration that we reduced the number of covariates to only 11 it's a satisfactory outcome.
+
+
+\newpage
+# Discussion
+
+We started with a large dataset for which we slowly tried to find the variables that would be more useful to explain our depdendent variable. The model had great performance predicting the true distribution of the training set, however, it failed to provide certainty when tested on another set. As expected, the model was heavily by variables of the Transit category, but a surprising aspect was that the category of light contamination failed to produce a variable that was significant, at least in terms of the techniques applied here.
+
+There are many options to continue the work in this model. For example, adding interaction terms or finding a way to incorporate the error measures. A couple more aspects that could be explored in more detail in future work is how to deal with the missing values or alternative methods for feature selection. Our model is a good starting point but there is definitely room for improvement.
+
+\newpage
+# References
+
+\begin{thebibliography}{9}
+\bibitem{exominer}
+Valizadegan, H., Martinho, M. J., Wilkens, L. S., Jenkins, J. M., Smith, J. C., Caldwell, D. A. (2022). ExoMiner: A Highly Accurate and Explainable Deep Learning Classifier That Validates 301 New Exoplanets. The Astrophysical Journal, 926(2), 120.
+
+\bibitem{alb}
+Saha, R. (2021). Comparing Classification Models on Kepler Data. arXiv preprint arXiv:2101.01904.
+
+\bibitem{nasa}
+Nasa Exoplanet Archive. [Online]. Available: https://exoplanetarchive.ipac.
+caltech.edu
+
+\bibitem{corr}
+Dormann, C. F., Elith, J., Bacher, S., Buchmann, C., Carl, G., Carré, G. (2013). Collinearity: a review of methods to deal with it and a simulation study evaluating their performance. Ecography, 36(1), 27-46.
+
+\end{thebibliography}
